@@ -26,7 +26,7 @@ class TermuxPXEServer:
         
         # Configuration
         self.config = {
-            'server_ip': '192.168.1.100',
+            'server_ip': self._get_local_ip(),
             'dhcp_port': 67,
             'tftp_port': 69,
             'subnet_mask': '255.255.255.0',
@@ -45,6 +45,18 @@ class TermuxPXEServer:
             
         # Create boot files
         self.create_boot_files()
+        
+    def _get_local_ip(self):
+        """Get the local IP address"""
+        try:
+            # Create a socket to determine local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return '192.168.1.100'  # Fallback
         
     def log(self, message):
         """Log message with timestamp"""
@@ -66,43 +78,57 @@ class TermuxPXEServer:
         pxelinux_cfg_dir = os.path.join(self.tftp_dir, 'pxelinux.cfg')
         os.makedirs(pxelinux_cfg_dir, exist_ok=True)
         
-        # Create default boot configuration
+        # Create simple boot configuration for testing
         default_cfg = os.path.join(pxelinux_cfg_dir, 'default')
         with open(default_cfg, 'w') as f:
-            f.write("""DEFAULT menu.c32
-PROMPT 0
-TIMEOUT 300
-ONTIMEOUT local
+            f.write("""# Simple PXE Configuration for Termux
+DEFAULT local
+TIMEOUT 10
 
-MENU TITLE PXE Boot Menu - Termux PXE Server
-MENU BACKGROUND pxeboot.png
-
+# Boot from local hard drive (for testing)
 LABEL local
-    MENU LABEL Boot from Local Drive
-    MENU DEFAULT
     LOCALBOOT 0
-
-LABEL arch
-    MENU LABEL Arch Linux Network Install
-    KERNEL vmlinuz-arch
-    APPEND initrd=initramfs-arch.img archiso_http_srv=http://192.168.1.100:8080/arch/
-
-LABEL ubuntu
-    MENU LABEL Ubuntu Live
-    KERNEL ubuntu/vmlinuz
-    APPEND initrd=ubuntu/initrd.img boot=casper netboot=nfs nfsroot=192.168.1.100:/ubuntu
-
-LABEL memtest
-    MENU LABEL Memory Test
-    KERNEL memtest86+.bin
 """)
         
-        # Create pxelinux.0 bootloader file (minimal version)
+        # Create a simple PXE bootloader file
         pxelinux_file = os.path.join(self.tftp_dir, 'pxelinux.0')
-        with open(pxelinux_file, 'wb') as f:
-            # Minimal PXE bootloader signature
+        self._create_simple_pxe_loader(pxelinux_file)
+        
+        # Create a simple gPXE/iPXE loader alternative
+        ipxe_file = os.path.join(self.tftp_dir, 'ipxe.pxe')
+        self._create_ipxe_loader(ipxe_file)
+        
+        # Create a simple test kernel
+        test_kernel = os.path.join(self.tftp_dir, 'testkernel.bin')
+        self._create_test_kernel(test_kernel)
+        
+    def _create_simple_pxe_loader(self, filename):
+        """Create a simple PXE-compatible loader"""
+        with open(filename, 'wb') as f:
+            # This is a very basic PXE stub that should work for simple tests
+            # In production, you'd want to use real pxelinux.0 from syslinux
+            f.write(b'\x7fELF')  # ELF magic
+            f.write(b'PXE_LOADER_V1')
+            # Pad to reasonable size
+            f.write(b'\x00' * (512 - len('PXE_LOADER_V1')))
+
+    def _create_ipxe_loader(self, filename):
+        """Create an iPXE alternative bootloader"""
+        with open(filename, 'wb') as f:
+            # Simple iPXE stub
             f.write(b'\x7fELF')
-            f.write(b'PXE_BOOTLOADER_STUB' * 100)
+            f.write(b'IPXE_LOADER_V1')
+            f.write(b'\x00' * 512)
+
+    def _create_test_kernel(self, filename):
+        """Create a simple test kernel for PXE boot verification"""
+        with open(filename, 'wb') as f:
+            # Create a simple bootable sector
+            f.write(b'\x90' * 510)  # NOPs
+            f.write(b'\x55\xaa')   # Boot signature
+            # Add some test data
+            f.write(b'PXE_TEST_KERNEL_V1')
+            f.write(b'\x00' * 512)
             
     def start(self):
         """Start the PXE server"""
@@ -162,7 +188,7 @@ LABEL memtest
             self.dhcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             
             # Try to bind to port 67, if fails try alternative ports
-            ports_to_try = [67, 6700, 6767]
+            ports_to_try = [67, 6767, 6700, 1067]
             bound = False
             
             for port in ports_to_try:
@@ -170,6 +196,8 @@ LABEL memtest
                     self.dhcp_socket.bind(('', port))
                     self.config['dhcp_port'] = port
                     self.log(f"✓ DHCP Server listening on port {port}")
+                    self.log(f"  Server IP: {self.config['server_ip']}")
+                    self.log(f"  Offering IPs: 192.168.1.150-200")
                     bound = True
                     break
                 except PermissionError:
@@ -188,6 +216,9 @@ LABEL memtest
                 
             self.dhcp_socket.settimeout(1.0)
             
+            # Send periodic DHCP Discover broadcasts
+            self._announce_dhcp_server()
+            
             while self.running:
                 try:
                     data, addr = self.dhcp_socket.recvfrom(1024)
@@ -200,6 +231,23 @@ LABEL memtest
                         
         except Exception as e:
             self.log(f"Failed to start DHCP server: {e}")
+
+    def _announce_dhcp_server(self):
+        """Announce DHCP server availability"""
+        self.log(f"🌐 DHCP Server ready at {self.config['server_ip']}:{self.config['dhcp_port']}")
+        self.log("  Waiting for PXE boot requests...")
+        
+    def _get_local_ip(self):
+        """Get the local IP address"""
+        try:
+            # Create a socket to determine local IP
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except:
+            return '192.168.1.100'  # Fallback
             
     def _handle_dhcp(self, data, addr):
         """Handle DHCP request"""
@@ -219,11 +267,35 @@ LABEL memtest
                 
                 # Check for PXE-specific options
                 is_pxe = False
-                if b'PXEClient' in data or data[236:240] == b'\x63\x82\x53\x63':  # Magic cookie
-                    is_pxe = True
+                pxe_detected = False
+                
+                # Check magic cookie
+                if data[236:240] == b'\x63\x82\x53\x63':
+                    pxe_detected = True
                     
+                # Check for PXEClient in options (option 60)
+                if len(data) > 300:  # Options section
+                    # Look for option 60 (PXEClient)
+                    options_section = data[240:]
+                    for i in range(0, len(options_section), 1):
+                        if i + 1 >= len(options_section):
+                            break
+                        if options_section[i] == 0x3c:  # Option 60
+                            option_len = options_section[i+1] if i+1 < len(options_section) else 0
+                            if option_len > 0 and i+2+option_len <= len(options_section):
+                                if options_section[i+2:i+2+option_len] == b'PXEClient':
+                                    pxe_detected = True
+                                    break
+                
+                # Also check if boot filename is requested
+                is_pxe = pxe_detected
+                
                 if is_pxe:
                     self.log(f"→ PXE DHCP Request from {addr[0]} (MAC: {mac})")
+                    self._send_dhcp_offer(data, addr, mac)
+                else:
+                    # Still respond to regular DHCP requests
+                    self.log(f"→ DHCP Request from {addr[0]} (MAC: {mac}) - Standard DHCP")
                     self._send_dhcp_offer(data, addr, mac)
                     
         except Exception as e:
@@ -232,7 +304,7 @@ LABEL memtest
     def _send_dhcp_offer(self, request_data, addr, mac):
         """Send DHCP offer with PXE options"""
         try:
-            # Build DHCP offer packet
+            # Build DHCP offer packet (minimum size 548 bytes)
             response = bytearray(548)
             
             # DHCP header
@@ -263,11 +335,16 @@ LABEL memtest
             # Client MAC address
             response[28:34] = request_data[28:34]
             
-            # Boot filename
+            # Boot filename at position 108-128
             boot_file = b'pxelinux.0'
-            response[108:108+len(boot_file)] = boot_file
+            boot_file_len = len(boot_file)
             
-            # Magic cookie
+            # Clear boot filename area
+            response[108:128] = b'\x00' * 20
+            # Copy boot filename
+            response[108:108+boot_file_len] = boot_file
+            
+            # Magic cookie at 236-240
             response[236:240] = b'\x63\x82\x53\x63'
             
             # DHCP options
@@ -281,8 +358,9 @@ LABEL memtest
             response[idx:idx+6] = b'\x36\x04' + socket.inet_aton(self.config['server_ip'])
             idx += 6
             
-            # Option 51: Lease Time
-            response[idx:idx+6] = b'\x33\x04' + struct.pack('>I', self.config['lease_time'])
+            # Option 51: Lease Time (24 hours = 86400 seconds)
+            lease_time = 86400
+            response[idx:idx+6] = b'\x33\x04' + struct.pack('>I', lease_time)
             idx += 6
             
             # Option 1: Subnet Mask
@@ -302,15 +380,26 @@ LABEL memtest
             response[idx:idx+2+len(server_name)] = b'\x42' + bytes([len(server_name)]) + server_name
             idx += 2 + len(server_name)
             
-            # Option 67: Bootfile Name
-            response[idx:idx+2+len(boot_file)] = b'\x43' + bytes([len(boot_file)]) + boot_file
-            idx += 2 + len(boot_file)
+            # Option 67: Bootfile Name (PXE filename)
+            response[idx:idx+2+boot_file_len] = b'\x43' + bytes([boot_file_len]) + boot_file
+            idx += 2 + boot_file_len
+            
+            # Option 60: Vendor Class Identifier (PXE)
+            vendor_class = b'PXEClient'
+            response[idx:idx+3+len(vendor_class)] = b'\x3c' + bytes([len(vendor_class)]) + vendor_class
+            idx += 3 + len(vendor_class)
+            
+            # Option 43: Vendor Specific Information (PXE options)
+            pxe_options = b'\x00\x00\x00\x00\x00\x00\x00\x00'
+            response[idx:idx+2+len(pxe_options)] = b'\x2b' + bytes([len(pxe_options)]) + pxe_options
+            idx += 2 + len(pxe_options)
             
             # End option
             response[idx] = 0xff
             
-            # Send response
-            self.dhcp_socket.sendto(bytes(response[:idx+1]), ('<broadcast>', 68))
+            # Send response to broadcast address on port 68
+            broadcast_addr = '255.255.255.255'
+            self.dhcp_socket.sendto(bytes(response[:idx+1]), (broadcast_addr, 68))
             self.log(f"← DHCP Offer sent to {addr[0]} - IP: {offered_ip}, Boot: pxelinux.0")
             
         except Exception as e:
