@@ -55,6 +55,14 @@ except ImportError as e:
         def error(self, msg): print(f"[ERROR] {msg}")
         def warning(self, msg): print(f"[WARNING] {msg}")
 
+# Enhanced DHCP Bridge Import
+try:
+    import ENHANCED_DHCP_BRIDGE
+    ENHANCED_DHCP_AVAILABLE = True
+except ImportError:
+    print("Enhanced DHCP Bridge not available - using standard mode")
+    ENHANCED_DHCP_AVAILABLE = False
+
 @dataclass
 class NetworkInterface:
     """Enhanced network interface representation"""
@@ -132,6 +140,10 @@ class UniversalNetworkBridge:
         self.auto_bridge = self.config.get('auto_bridge', True)
         self.zero_config = self.config.get('zero_config', True)
         self.debug_mode = self.config.get('debug_mode', False)
+        
+        # Enhanced DHCP Bridge
+        self.enhanced_dhcp_bridge = None
+        self.use_enhanced_dhcp = self.config.get('use_enhanced_dhcp', True) and ENHANCED_DHCP_AVAILABLE
         
         # Threading
         self.monitoring_thread = None
@@ -885,6 +897,10 @@ class UniversalNetworkBridge:
             if self.auto_bridge:
                 self._auto_create_bridges()
             
+            # Start Enhanced DHCP Bridge if enabled
+            if self.use_enhanced_dhcp:
+                self._start_enhanced_dhcp_bridge()
+            
             self.logger.info("✅ Universal Network Bridge started successfully")
             return True
             
@@ -901,6 +917,11 @@ class UniversalNetworkBridge:
             self.logger.info("🛑 STOPPING UNIVERSAL NETWORK BRIDGE")
             
             self.is_running = False
+            
+            # Stop Enhanced DHCP Bridge
+            if self.enhanced_dhcp_bridge:
+                self.enhanced_dhcp_bridge.stop()
+                self.enhanced_dhcp_bridge = None
             
             # Close all UDP tunnels
             for tunnel_id, tunnel_socket in self.udp_tunnels.items():
@@ -1284,6 +1305,37 @@ class UniversalNetworkBridge:
         # This would clean up endpoints that haven't been active recently
         pass
     
+    def _start_enhanced_dhcp_bridge(self):
+        """Start the Enhanced DHCP Bridge for PXE fixes"""
+        if not self.use_enhanced_dhcp or not ENHANCED_DHCP_AVAILABLE:
+            return
+        
+        try:
+            self.logger.info("🔧 Starting Enhanced DHCP Bridge for PXE E53 fix...")
+            
+            # Create Enhanced DHCP Bridge instance
+            self.enhanced_dhcp_bridge = ENHANCED_DHCP_BRIDGE.EnhancedDHCPBridge()
+            self.enhanced_dhcp_bridge.start()
+            
+            # Log successful start
+            self.logger.info("✅ Enhanced DHCP Bridge started - PXE E53 error will be fixed")
+            self.logger.info("🎯 WiFi-to-Ethernet DHCP bridging enabled")
+            self.logger.info("🔗 Router isolation bypass active")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start Enhanced DHCP Bridge: {e}")
+            self.use_enhanced_dhcp = False  # Disable if failed
+    
+    def _stop_enhanced_dhcp_bridge(self):
+        """Stop the Enhanced DHCP Bridge"""
+        if self.enhanced_dhcp_bridge:
+            try:
+                self.enhanced_dhcp_bridge.stop()
+                self.enhanced_dhcp_bridge = None
+                self.logger.info("🛑 Enhanced DHCP Bridge stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping Enhanced DHCP Bridge: {e}")
+    
     # Utility methods
     def _prefix_to_netmask(self, prefix: int) -> str:
         """Convert prefix length to netmask"""
@@ -1297,6 +1349,17 @@ class UniversalNetworkBridge:
         except:
             return False
     
+    def get_enhanced_dhcp_status(self) -> Dict[str, Any]:
+        """Get Enhanced DHCP Bridge status"""
+        return {
+            'enhanced_dhcp_enabled': self.use_enhanced_dhcp,
+            'enhanced_dhcp_available': ENHANCED_DHCP_AVAILABLE,
+            'enhanced_dhcp_running': self.enhanced_dhcp_bridge is not None and self.enhanced_dhcp_bridge.running if self.enhanced_dhcp_bridge else False,
+            'dhcp_fixes_active': self.use_enhanced_dhcp and ENHANCED_DHCP_AVAILABLE,
+            'ethernet_dhcp_forwarding': self.use_enhanced_dhcp and ENHANCED_DHCP_AVAILABLE,
+            'pxe_e53_fix_enabled': self.use_enhanced_dhcp and ENHANCED_DHCP_AVAILABLE
+        }
+    
     # Public API methods
     def get_network_topology(self) -> Dict[str, Any]:
         """Get current network topology"""
@@ -1305,7 +1368,8 @@ class UniversalNetworkBridge:
             'segments': {name: asdict(segment) for name, segment in self.network_segments.items()},
             'bridge_endpoints': {name: asdict(endpoint) for name, endpoint in self.bridge_endpoints.items()},
             'active_tunnels': len(self.udp_tunnels),
-            'mixed_scenario': self._detect_mixed_scenario()
+            'mixed_scenario': self._detect_mixed_scenario(),
+            'enhanced_dhcp': self.get_enhanced_dhcp_status()
         }
     
     def create_bridge(self, interface1: str, interface2: str) -> bool:
