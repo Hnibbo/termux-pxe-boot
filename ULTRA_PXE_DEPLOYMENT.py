@@ -46,6 +46,7 @@ class UltraPXEDeployment:
         self.multi_proto_active = False
         
         logger.info("🎯 ULTRA-AGGRESSIVE PXE E53 BYPASS DEPLOYMENT SYSTEM")
+        logger.info("💪 NOW WITH LINUX ON STEROIDS BOOT!")
         logger.info("=" * 60)
         
     def check_requirements(self):
@@ -348,6 +349,43 @@ class UltraPXEDeployment:
             logger.info("🛑 Bridge hijacking stopped by user")
         finally:
             self.cleanup_attacks()
+    
+    def deploy_steroids_pxe(self, interface=None):
+        """Deploy Linux on Steroids PXE bypass."""
+        logger.info("💪 LINUX ON STEROIDS PXE MODE")
+        logger.info("=" * 40)
+        
+        # Auto-detect interface if not specified
+        interfaces = self.get_network_interfaces()
+        if interface:
+            self.interface = interface
+        elif 'eth0' in interfaces:
+            self.interface = 'eth0'
+        else:
+            self.interface = interfaces[0] if interfaces else "eth0"
+        
+        # Auto-detect target
+        self.target_mac = self.detect_target_pc()
+        
+        logger.info(f"🎯 Steroids Target: {self.target_mac or 'BROADCAST'}")
+        logger.info(f"🌐 Interface: {self.interface}")
+        logger.info(f"🚀 Boot: Arch Linux on Steroids (MAXIMUM PERFORMANCE)")
+        
+        # Deploy steroids PXE bypass
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("STEROIDS_PXE_BYPASS", "STEROIDS_PXE_BYPASS.py")
+            steroids_bypass = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(steroids_bypass)
+            
+            logger.info("💪 Starting LINUX ON STEROIDS PXE bypass")
+            steroids = steroids_bypass.SteroidsPXEBypass(self.target_mac, self.interface)
+            steroids.start_steroids_attack()
+            
+        except KeyboardInterrupt:
+            logger.info("🛑 Steroids PXE bypass stopped by user")
+        except Exception as e:
+            logger.error(f"❌ Steroids PXE bypass failed: {e}")
 
 def main():
     deployment = UltraPXEDeployment()
@@ -364,15 +402,23 @@ def main():
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py <target_mac> [interface] [boot_filename]")
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --auto")
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --bridge [wifi_interface] [eth_interface]")
+        print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --steroids [interface]")
         print()
         print("Examples:")
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py aa:bb:cc:dd:ee:ff eth0 pxelinux.0")
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --auto")
         print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --bridge wlan0 eth0")
+        print("  sudo python3 ULTRA_PXE_DEPLOYMENT.py --steroids")
+        print()
+        print("💪 NEW: LINUX ON STEROIDS BOOT - Maximum Performance!")
         sys.exit(0)
     
     elif sys.argv[1] == "--auto":
         deployment.auto_deploy()
+    
+    elif sys.argv[1] == "--steroids":
+        interface = sys.argv[2] if len(sys.argv) > 2 else None
+        deployment.deploy_steroids_pxe(interface)
     
     elif sys.argv[1] == "--bridge":
         wifi_if = sys.argv[2] if len(sys.argv) > 2 else None
